@@ -289,6 +289,46 @@ footer a { color: #a0522d; text-decoration: none; }
 }
 .dash-stat .stat-value { font-size: 1.4em; font-weight: 700; color: #a0522d; }
 .dash-stat .stat-label { font-size: 0.8em; color: #8a7e6e; margin-top: 4px; }
+
+/* Compliance badge */
+.compliance-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; background: #e8f5e9; color: #2e7d32;
+  border-radius: 20px; font-size: 0.78em; font-weight: 600; margin-top: 8px;
+}
+.compliance-badge::before { content: '✓'; font-weight: 700; }
+
+/* Templates */
+.template-list { display: flex; flex-direction: column; gap: 8px; }
+.template-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px; background: #faf8f5; border-radius: 10px; border: 1px solid #e8e2d9;
+}
+.template-info { flex: 1; }
+.template-info .t-name { font-weight: 600; font-size: 0.9em; }
+.template-info .t-detail { font-size: 0.78em; color: #8a7e6e; margin-top: 2px; }
+.template-actions { display: flex; gap: 6px; }
+.template-actions button {
+  padding: 6px 12px; border-radius: 6px; border: none;
+  font-size: 0.8em; font-family: inherit; cursor: pointer;
+}
+.btn-template-use { background: #a0522d; color: #fff; }
+.btn-template-use:hover { background: #8b4526; }
+.btn-template-del { background: #f3efe9; color: #8a7e6e; }
+.btn-template-del:hover { background: #e8e2d9; }
+
+/* Print styles */
+@media print {
+  body { background: #fff; width: auto; }
+  .container { max-width: 100%; padding: 0; }
+  .header, .card:not(#reportCard), footer, .btn-primary, .btn-outline, .btn-row, .toast { display: none !important; }
+  #reportCard { display: block !important; box-shadow: none; border: none; padding: 0; }
+  #reportCard h2 { font-size: 1.2em; }
+  .report-header { margin-bottom: 24px; }
+  .report-header h3 { font-size: 1.1em; }
+  .history-table { font-size: 0.8em; }
+  .bar-chart { page-break-inside: avoid; }
+}
 </style>
 </head>
 <body>
@@ -308,6 +348,9 @@ footer a { color: #a0522d; text-decoration: none; }
       </div>
     </div>
   </div>
+
+  <!-- Compliance badge -->
+  <div class="compliance-badge">電子帳簿保存法対応 — 証憑はGoogle Driveに自動保存</div>
 
   <!-- Upload -->
   <div class="card">
@@ -382,6 +425,27 @@ footer a { color: #a0522d; text-decoration: none; }
     </div>
   </div>
 
+  <!-- Templates -->
+  <div class="card">
+    <h2>テンプレート</h2>
+    <p style="font-size:0.85em;color:#8a7e6e;margin-bottom:12px">毎月の固定費（家賃・サブスク等）をワンタップで登録できます。</p>
+    <div class="template-list" id="templateList"></div>
+    <button class="btn-outline" onclick="showTemplateForm()" style="width:100%;margin-top:8px" id="addTemplateBtn">＋ テンプレートを追加</button>
+    <div id="templateForm" style="display:none;margin-top:12px;padding:16px;background:#faf8f5;border-radius:10px;border:1px solid #e8e2d9">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input type="text" id="tplStore" placeholder="店名・支払先" style="padding:8px;border:1px solid #d4cdc2;border-radius:6px;font-family:inherit;font-size:0.85em">
+        <input type="number" id="tplAmount" placeholder="金額" style="padding:8px;border:1px solid #d4cdc2;border-radius:6px;font-family:inherit;font-size:0.85em">
+        <select id="tplCategory" style="padding:8px;border:1px solid #d4cdc2;border-radius:6px;font-family:inherit;font-size:0.85em"></select>
+        <select id="tplTax" style="padding:8px;border:1px solid #d4cdc2;border-radius:6px;font-family:inherit;font-size:0.85em"></select>
+      </div>
+      <input type="text" id="tplDesc" placeholder="摘要" style="width:100%;margin-top:8px;padding:8px;border:1px solid #d4cdc2;border-radius:6px;font-family:inherit;font-size:0.85em">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary" onclick="saveTemplate()" style="flex:1;padding:10px">保存</button>
+        <button class="btn-outline" onclick="hideTemplateForm()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Export -->
   <div class="card">
     <h2>エクスポート</h2>
@@ -391,9 +455,13 @@ footer a { color: #a0522d; text-decoration: none; }
       <button class="btn-outline" onclick="exportCSV('yayoi')">弥生会計フォーマット</button>
       <button class="btn-outline" onclick="exportCSV('freee')">freeeフォーマット</button>
       <button class="btn-outline" onclick="exportCSV('moneyforward')">マネーフォワードフォーマット</button>
+      <button class="btn-outline" onclick="printMonthlyReport()" style="border-color:#4a6741;color:#4a6741">月次レポート印刷 / PDF</button>
     </div>
     <p style="font-size:0.75em;color:#999;margin-top:8px">※ ダッシュボードの「データを読み込む」を先に実行してください</p>
   </div>
+
+  <!-- Report (print only) -->
+  <div class="card" id="reportCard" style="display:none"></div>
 
   <footer>
     <a href="https://github.com/Choreia/Expense" target="_blank">GitHub</a> &nbsp;|&nbsp;
@@ -414,6 +482,7 @@ var SHEET_NAME = '経費';
 var tokenClient = null;
 var accessToken = null;
 var spreadsheetId = null;
+var driveFolderId = null; // 電帳法: 証憑保存フォルダ
 var pendingImages = []; // {file, dataUrl}
 var parsedResults = []; // [{date, store, amount, category, description, tax}]
 
@@ -437,6 +506,7 @@ async function onTokenResponse(resp) {
     document.getElementById('user-avatar').src = me.picture || '';
   } catch(e) {}
   await findOrCreateSpreadsheet();
+  await findOrCreateDriveFolder();
 }
 
 function handleSignIn() {
@@ -490,6 +560,7 @@ async function findOrCreateSpreadsheet() {
           {userEnteredValue:{stringValue:'摘要'}},
           {userEnteredValue:{stringValue:'税区分'}},
           {userEnteredValue:{stringValue:'登録日時'}},
+          {userEnteredValue:{stringValue:'証憑URL'}},
         ]}]
       }]
     }]
@@ -501,6 +572,58 @@ async function findOrCreateSpreadsheet() {
   });
   spreadsheetId = created.spreadsheetId;
   showToast('スプレッドシートを作成しました');
+}
+
+// ==================== Drive folder (電帳法) ====================
+async function findOrCreateDriveFolder() {
+  var folderName = 'Choreia Expense 証憑';
+  var q = encodeURIComponent("name='" + folderName + "' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  var search = await apiFetch('https://www.googleapis.com/drive/v3/files?q=' + q + '&fields=files(id)');
+  if (search.files && search.files.length > 0) {
+    driveFolderId = search.files[0].id;
+    return;
+  }
+  var body = { name: folderName, mimeType: 'application/vnd.google-apps.folder' };
+  var created = await apiFetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  driveFolderId = created.id;
+}
+
+async function uploadReceiptToDrive(dataUrl, storeName, date) {
+  if (!driveFolderId) return '';
+  var match = dataUrl.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  if (!match) return '';
+  var mimeType = match[1];
+  var base64Data = match[2];
+  var ext = mimeType === 'image/png' ? '.png' : '.jpg';
+  var timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  var fileName = date + '_' + storeName.slice(0, 20) + '_' + timestamp + ext;
+
+  var metadata = { name: fileName, parents: [driveFolderId] };
+  var boundary = '===choreia_boundary===';
+  var body = '--' + boundary + '\r\n' +
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify(metadata) + '\r\n' +
+    '--' + boundary + '\r\n' +
+    'Content-Type: ' + mimeType + '\r\n' +
+    'Content-Transfer-Encoding: base64\r\n\r\n' +
+    base64Data + '\r\n' +
+    '--' + boundary + '--';
+
+  var res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'multipart/related; boundary=' + boundary,
+    },
+    body: body,
+  });
+  if (!res.ok) return '';
+  var file = await res.json();
+  return file.webViewLink || ('https://drive.google.com/file/d/' + file.id + '/view');
 }
 
 // ==================== File handling ====================
@@ -680,18 +803,34 @@ async function saveToSheets() {
 
   try {
     var now = new Date().toLocaleString('ja-JP');
-    var values = parsedResults.map(function(r) {
-      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now];
+
+    // 電帳法: レシート画像をDriveにアップロード
+    status.innerHTML = '<span class="spinner"></span>証憑をアップロード中...';
+    var driveLinks = [];
+    for (var i = 0; i < parsedResults.length; i++) {
+      var link = '';
+      if (pendingImages[i] && pendingImages[i].dataUrl) {
+        link = await uploadReceiptToDrive(pendingImages[i].dataUrl, parsedResults[i].store, parsedResults[i].date);
+      }
+      driveLinks.push(link);
+    }
+    status.innerHTML = '<span class="spinner"></span>Sheetsに保存中...';
+
+    var values = parsedResults.map(function(r, idx) {
+      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, driveLinks[idx] || ''];
     });
 
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:G:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
     });
 
-    status.innerHTML = '<span class="success">' + parsedResults.length + '件保存しました</span>';
-    showToast(parsedResults.length + '件の経費を保存しました');
+    var savedWithReceipt = driveLinks.filter(function(l) { return l; }).length;
+    var msg = parsedResults.length + '件保存しました';
+    if (savedWithReceipt > 0) msg += '（証憑' + savedWithReceipt + '件保存済）';
+    status.innerHTML = '<span class="success">' + msg + '</span>';
+    showToast(msg);
 
     // Clear after save
     parsedResults = [];
@@ -958,9 +1097,161 @@ function showToast(msg, type) {
   setTimeout(function() { t.remove(); }, 3000);
 }
 
+// ==================== Templates ====================
+function getTemplates() {
+  try { return JSON.parse(localStorage.getItem('choreia_expense_templates') || '[]'); } catch(e) { return []; }
+}
+
+function saveTemplatesData(templates) {
+  localStorage.setItem('choreia_expense_templates', JSON.stringify(templates));
+}
+
+function renderTemplates() {
+  var templates = getTemplates();
+  var container = document.getElementById('templateList');
+  if (templates.length === 0) {
+    container.innerHTML = '<div class="empty-state" style="padding:16px"><p style="font-size:0.85em">テンプレートがありません</p></div>';
+    return;
+  }
+  container.innerHTML = templates.map(function(t, i) {
+    return '<div class="template-item">' +
+      '<div class="template-info"><div class="t-name">' + escHtml(t.store) + ' — ¥' + Number(t.amount).toLocaleString() + '</div>' +
+      '<div class="t-detail">' + escHtml(t.category) + ' / ' + escHtml(t.description || '-') + '</div></div>' +
+      '<div class="template-actions">' +
+      '<button class="btn-template-use" onclick="useTemplate(' + i + ')">登録</button>' +
+      '<button class="btn-template-del" onclick="deleteTemplate(' + i + ')">×</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+function showTemplateForm() {
+  var form = document.getElementById('templateForm');
+  form.style.display = 'block';
+  document.getElementById('addTemplateBtn').style.display = 'none';
+  // Populate selects
+  var catSel = document.getElementById('tplCategory');
+  if (catSel.options.length === 0) {
+    CATEGORIES.forEach(function(c) { var o = document.createElement('option'); o.textContent = c; catSel.appendChild(o); });
+    var taxSel = document.getElementById('tplTax');
+    TAX_TYPES.forEach(function(t) { var o = document.createElement('option'); o.textContent = t; taxSel.appendChild(o); });
+  }
+}
+
+function hideTemplateForm() {
+  document.getElementById('templateForm').style.display = 'none';
+  document.getElementById('addTemplateBtn').style.display = 'block';
+}
+
+function saveTemplate() {
+  var store = document.getElementById('tplStore').value.trim();
+  var amount = Number(document.getElementById('tplAmount').value);
+  if (!store || !amount) { showToast('店名と金額を入力してください', 'error'); return; }
+  var templates = getTemplates();
+  templates.push({
+    store: store,
+    amount: amount,
+    category: document.getElementById('tplCategory').value,
+    tax: document.getElementById('tplTax').value,
+    description: document.getElementById('tplDesc').value.trim(),
+  });
+  saveTemplatesData(templates);
+  hideTemplateForm();
+  renderTemplates();
+  document.getElementById('tplStore').value = '';
+  document.getElementById('tplAmount').value = '';
+  document.getElementById('tplDesc').value = '';
+  showToast('テンプレートを保存しました');
+}
+
+function deleteTemplate(idx) {
+  var templates = getTemplates();
+  templates.splice(idx, 1);
+  saveTemplatesData(templates);
+  renderTemplates();
+}
+
+async function useTemplate(idx) {
+  if (!accessToken) { showToast('Googleにログインしてください', 'error'); return; }
+  if (!spreadsheetId) { showToast('スプレッドシートが見つかりません', 'error'); return; }
+  var t = getTemplates()[idx];
+  var now = new Date().toLocaleString('ja-JP');
+  var today = new Date().toISOString().slice(0, 10);
+  var values = [[today, t.store, t.amount, t.category, t.description, t.tax, now, '']];
+  try {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: values }),
+    });
+    showToast(t.store + ' ¥' + Number(t.amount).toLocaleString() + ' を登録しました');
+  } catch(e) {
+    showToast('登録エラー: ' + e.message, 'error');
+  }
+}
+
+// ==================== Monthly Report (Print/PDF) ====================
+function printMonthlyReport() {
+  if (allExpenseRows.length === 0) { showToast('先にデータを読み込んでください', 'error'); return; }
+
+  var month = histMonth || new Date().toISOString().slice(0, 7);
+  var filtered = allExpenseRows.filter(function(r) { return r.date.slice(0, 7) === month; });
+  filtered.sort(function(a, b) { return a.date.localeCompare(b.date); });
+
+  var total = filtered.reduce(function(s, r) { return s + r.amount; }, 0);
+
+  // Category breakdown
+  var cats = {};
+  filtered.forEach(function(r) { cats[r.category] = (cats[r.category] || 0) + r.amount; });
+  var catSorted = Object.entries(cats).sort(function(a, b) { return b[1] - a[1]; });
+
+  var parts = month.split('-');
+  var title = parts[0] + '年' + Number(parts[1]) + '月 経費レポート';
+
+  var html = '<div class="report-header">' +
+    '<h2 style="border-bottom:2px solid #a0522d;padding-bottom:8px">' + title + '</h2>' +
+    '<p style="color:#8a7e6e;font-size:0.85em;margin-top:8px">出力日: ' + new Date().toLocaleDateString('ja-JP') + ' | Choreia Expense</p>' +
+    '</div>';
+
+  // Summary
+  html += '<div style="display:flex;gap:16px;margin:16px 0">' +
+    '<div style="flex:1;background:#faf8f5;padding:16px;border-radius:10px;text-align:center">' +
+    '<div style="font-size:1.4em;font-weight:700;color:#a0522d">¥' + total.toLocaleString() + '</div><div style="font-size:0.8em;color:#8a7e6e">合計金額</div></div>' +
+    '<div style="flex:1;background:#faf8f5;padding:16px;border-radius:10px;text-align:center">' +
+    '<div style="font-size:1.4em;font-weight:700;color:#a0522d">' + filtered.length + '件</div><div style="font-size:0.8em;color:#8a7e6e">取引数</div></div></div>';
+
+  // Category breakdown
+  if (catSorted.length > 0) {
+    html += '<h3 style="font-size:0.95em;margin:16px 0 8px;color:#2c2418">カテゴリ別内訳</h3>';
+    html += '<table class="history-table"><thead><tr><th>勘定科目</th><th style="text-align:right">金額</th><th style="text-align:right">構成比</th></tr></thead><tbody>';
+    catSorted.forEach(function(entry) {
+      var pct = total > 0 ? Math.round(entry[1] / total * 100) : 0;
+      html += '<tr><td>' + escHtml(entry[0]) + '</td><td class="amount-cell">¥' + entry[1].toLocaleString() + '</td><td class="amount-cell">' + pct + '%</td></tr>';
+    });
+    html += '</tbody></table>';
+  }
+
+  // Detail table
+  html += '<h3 style="font-size:0.95em;margin:24px 0 8px;color:#2c2418">明細一覧</h3>';
+  html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th>摘要</th><th style="text-align:right">金額</th></tr></thead><tbody>';
+  filtered.forEach(function(r) {
+    html += '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.store) + '</td><td>' + escHtml(r.category) + '</td><td>' + escHtml(r.description) + '</td><td class="amount-cell">¥' + r.amount.toLocaleString() + '</td></tr>';
+  });
+  html += '<tr style="font-weight:700;border-top:2px solid #e8e2d9"><td colspan="4">合計</td><td class="amount-cell">¥' + total.toLocaleString() + '</td></tr>';
+  html += '</tbody></table>';
+
+  // Compliance note
+  html += '<p style="font-size:0.75em;color:#8a7e6e;margin-top:16px">※ 証憑画像はGoogle Drive「Choreia Expense 証憑」フォルダに保存されています（電子帳簿保存法対応）</p>';
+
+  var reportCard = document.getElementById('reportCard');
+  reportCard.innerHTML = html;
+  reportCard.style.display = 'block';
+  setTimeout(function() { window.print(); reportCard.style.display = 'none'; }, 100);
+}
+
 // ==================== Init ====================
 function init() {
   setupDropArea();
+  renderTemplates();
   if (typeof google !== 'undefined' && google.accounts) {
     initGIS();
   } else {
