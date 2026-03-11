@@ -614,6 +614,7 @@ async function findOrCreateSpreadsheet() {
   if (search.files && search.files.length > 0) {
     spreadsheetId = search.files[0].id;
     await ensureLogSheet();
+    await protectSheets();
     return;
   }
   // Create new
@@ -645,6 +646,7 @@ async function findOrCreateSpreadsheet() {
           {userEnteredValue:{stringValue:'変更前'}},
           {userEnteredValue:{stringValue:'変更後'}},
           {userEnteredValue:{stringValue:'操作者'}},
+          {userEnteredValue:{stringValue:'整合性ハッシュ'}},
         ]}]
       }]
     }]
@@ -655,10 +657,51 @@ async function findOrCreateSpreadsheet() {
     body: JSON.stringify(body),
   });
   spreadsheetId = created.spreadsheetId;
+  await protectSheets();
   showToast('スプレッドシートを作成しました');
 }
 
 // ==================== 変更履歴ログ（電帳法） ====================
+
+// SHA-256ハッシュ（改ざん検知用）
+async function computeHash(text) {
+  var encoder = new TextEncoder();
+  var data = encoder.encode(text);
+  var hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  var hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+// シート保護（直接編集を防止）
+async function protectSheets() {
+  if (!spreadsheetId) return;
+  try {
+    var meta = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '?fields=sheets(properties(sheetId,title),protectedRanges)');
+    var requests = [];
+    meta.sheets.forEach(function(s) {
+      var hasProtection = s.protectedRanges && s.protectedRanges.length > 0;
+      if (!hasProtection) {
+        requests.push({
+          addProtectedRange: {
+            protectedRange: {
+              range: { sheetId: s.properties.sheetId },
+              description: '電子帳簿保存法: アプリ経由でのみ編集可能',
+              warningOnly: true
+            }
+          }
+        });
+      }
+    });
+    if (requests.length > 0) {
+      await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + ':batchUpdate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: requests }),
+      });
+    }
+  } catch(e) { /* ignore */ }
+}
+
 async function ensureLogSheet() {
   try {
     var meta = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '?fields=sheets.properties.title');
@@ -674,7 +717,7 @@ async function ensureLogSheet() {
     await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(LOG_SHEET_NAME) + '!A1:F1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [['操作日時', '操作種別', '対象行', '変更前', '変更後', '操作者']] }),
+      body: JSON.stringify({ values: [['操作日時', '操作種別', '対象行', '変更前', '変更後', '操作者', '整合性ハッシュ']] }),
     });
   } catch(e) { /* ignore */ }
 }
@@ -682,9 +725,11 @@ async function ensureLogSheet() {
 async function appendChangeLog(type, targetRow, before, after) {
   if (!spreadsheetId) return;
   var now = new Date().toLocaleString('ja-JP');
-  var values = [[now, type, targetRow, before, after, currentUserName]];
+  var hashSource = now + '|' + type + '|' + targetRow + '|' + before + '|' + after + '|' + currentUserName;
+  var hash = await computeHash(hashSource);
+  var values = [[now, type, targetRow, before, after, currentUserName, hash]];
   try {
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(LOG_SHEET_NAME) + '!A:F:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(LOG_SHEET_NAME) + '!A:G:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
