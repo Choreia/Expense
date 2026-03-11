@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Choreia Expense — レシートをAIで自動仕訳</title>
+<meta name="description" content="レシートを撮影するだけでAIが自動仕訳。データはGoogle Sheetsに保存。完全無料・オープンソース。">
+<meta property="og:title" content="Choreia Expense — レシートをAIで自動仕訳">
+<meta property="og:description" content="レシートを撮影するだけでAIが自動仕訳。データはGoogle Sheetsに保存。完全無料・オープンソース。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://choreia.github.io/Expense/">
+<meta property="og:locale" content="ja_JP">
+<meta property="og:site_name" content="Choreia">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://choreia.github.io/Expense/">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src https://www.googleapis.com https://accounts.google.com https://sheets.googleapis.com https://generativelanguage.googleapis.com; frame-src https://accounts.google.com; img-src 'self' https://*.googleusercontent.com data: blob:;">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans JP", sans-serif;
+  background: #faf8f5;
+  color: #2c2418;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+.container { max-width: 640px; margin: 0 auto; padding: 16px; }
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.header h1 { font-size: 1.3em; }
+.header h1 span { color: #a0522d; }
+.auth-area { display: flex; align-items: center; gap: 8px; font-size: 0.85em; }
+.auth-area img { width: 28px; height: 28px; border-radius: 50%; }
+.btn-google {
+  padding: 8px 16px;
+  background: #fff;
+  color: #2c2418;
+  border: 1px solid #d4cdc2;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85em;
+  font-family: inherit;
+}
+.btn-google:hover { background: #faf8f5; }
+.btn-signout {
+  padding: 4px 10px;
+  background: #f3efe9;
+  color: #8a7e6e;
+  border: 1px solid #d4cdc2;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8em;
+  font-family: inherit;
+}
+
+/* Cards */
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(44,36,24,0.06);
+}
+.card h2 {
+  font-size: 1.05em;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #a0522d;
+}
+
+/* Upload area */
+.upload-area {
+  border: 2px dashed #d4cdc2;
+  border-radius: 16px;
+  padding: 48px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #faf8f5;
+}
+.upload-area:hover, .upload-area.dragover {
+  border-color: #a0522d;
+  background: #fdf5f0;
+}
+.upload-icon { font-size: 3em; margin-bottom: 8px; }
+.upload-text { color: #8a7e6e; font-size: 0.95em; line-height: 1.6; }
+
+/* Thumbnails */
+.thumbnails { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.thumb-wrap { position: relative; }
+.thumb-img {
+  width: 80px; height: 80px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 2px solid #e8e2d9;
+}
+.thumb-remove {
+  position: absolute; top: -6px; right: -6px;
+  width: 22px; height: 22px;
+  background: #d32f2f; color: #fff;
+  border: none; border-radius: 50%;
+  font-size: 14px; line-height: 22px;
+  cursor: pointer;
+}
+
+/* Buttons */
+.btn-primary {
+  width: 100%;
+  padding: 14px;
+  background: #a0522d;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.05em;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.2s;
+}
+.btn-primary:hover { background: #8b4526; }
+.btn-primary:disabled { background: #d4cdc2; cursor: not-allowed; }
+.btn-outline {
+  padding: 10px 20px;
+  background: #fff;
+  color: #a0522d;
+  border: 2px solid #a0522d;
+  border-radius: 10px;
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-outline:hover { background: #fdf5f0; }
+.btn-row { display: flex; gap: 8px; margin-top: 16px; }
+
+/* Result items */
+.result-item {
+  background: #faf8f5;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e8e2d9;
+}
+.result-item .field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 0.9em;
+}
+.result-item .field .label { color: #8a7e6e; min-width: 80px; }
+.result-item .field .value { font-weight: 600; text-align: right; }
+.result-item .amount {
+  font-size: 1.3em;
+  font-weight: 700;
+  color: #a0522d;
+  text-align: right;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e8e2d9;
+}
+.result-item select, .result-item input[type="text"], .result-item input[type="date"] {
+  padding: 6px 10px;
+  border: 1px solid #d4cdc2;
+  border-radius: 6px;
+  font-size: 0.85em;
+  background: #fff;
+  font-family: inherit;
+  max-width: 200px;
+}
+
+/* Status / spinner */
+.status { text-align: center; margin-top: 12px; font-size: 0.9em; }
+.status.success { color: #4a6741; }
+.status.error { color: #d32f2f; }
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 3px solid #e8e2d9;
+  border-top-color: #a0522d;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* History table */
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.history-table th {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 2px solid #e8e2d9;
+  color: #8a7e6e;
+  font-weight: 600;
+}
+.history-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #f3efe9;
+}
+.history-table .amount-cell { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 24px;
+  font-size: 0.8em;
+  color: #8a7e6e;
+}
+footer a { color: #a0522d; text-decoration: none; }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  background: #2c2418;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 0.9em;
+  z-index: 9999;
+  animation: fadeInUp 0.3s ease;
+}
+.toast.error { background: #d32f2f; }
+@keyframes fadeInUp { from { opacity: 0; transform: translateX(-50%) translateY(20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 32px; color: #8a7e6e; }
+.empty-state .icon { font-size: 2.5em; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1><span>Expense</span></h1>
+    <div class="auth-area">
+      <div id="auth-out">
+        <button class="btn-google" onclick="handleSignIn()">Googleでログイン</button>
+      </div>
+      <div id="auth-in" style="display:none">
+        <img id="user-avatar" src="" alt="">
+        <span id="user-name"></span>
+        <button class="btn-signout" onclick="handleSignOut()">ログアウト</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <h2>レシート読み取り</h2>
+    <div class="upload-area" id="dropArea">
+      <div class="upload-icon">&#x1F4F7;</div>
+      <div class="upload-text">レシートをドラッグ＆ドロップ<br>またはタップして撮影・選択</div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none" multiple>
+
+    <div class="thumbnails" id="thumbnails"></div>
+
+    <button class="btn-primary" onclick="processReceipts()" id="processBtn" style="margin-top:16px" disabled>
+      AIで読み取る
+    </button>
+    <div class="status" id="processStatus"></div>
+  </div>
+
+  <!-- Results -->
+  <div class="card" id="resultsCard" style="display:none">
+    <h2>読み取り結果</h2>
+    <div id="results"></div>
+    <div class="btn-row">
+      <button class="btn-primary" onclick="saveToSheets()" id="saveBtn" style="flex:1">Google Sheetsに保存</button>
+      <button class="btn-outline" onclick="clearResults()">クリア</button>
+    </div>
+    <div class="status" id="saveStatus"></div>
+  </div>
+
+  <!-- History -->
+  <div class="card">
+    <h2>保存済み経費</h2>
+    <div id="historyArea">
+      <div class="empty-state">
+        <div class="icon">&#x1F4CB;</div>
+        <p>まだ経費が保存されていません</p>
+      </div>
+    </div>
+    <button class="btn-outline" onclick="loadHistory()" style="margin-top:12px;width:100%">履歴を読み込む</button>
+  </div>
+
+  <footer>
+    <a href="https://github.com/Choreia/Expense" target="_blank">GitHub</a> &nbsp;|&nbsp;
+    <a href="https://github.com/Choreia/Books" target="_blank">Choreia Books</a> &nbsp;|&nbsp;
+    <a href="https://github.com/Choreia/Forms" target="_blank">Choreia Forms</a> &nbsp;|&nbsp;
+    MIT License
+  </footer>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+// ==================== Config ====================
+var CLIENT_ID = '267211003481-pck8amdusjfedr9gvvlje4uke53ig4lh.apps.googleusercontent.com';
+var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/generative-language.generativelanguage';
+var SPREADSHEET_TITLE = 'Choreia Expense データ';
+var SHEET_NAME = '経費';
+
+var tokenClient = null;
+var accessToken = null;
+var spreadsheetId = null;
+var pendingImages = []; // {file, dataUrl}
+var parsedResults = []; // [{date, store, amount, category, description, tax}]
+
+// ==================== Auth ====================
+function initGIS() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: onTokenResponse,
+  });
+}
+
+async function onTokenResponse(resp) {
+  if (resp.error) return;
+  accessToken = resp.access_token;
+  document.getElementById('auth-out').style.display = 'none';
+  document.getElementById('auth-in').style.display = 'flex';
+  try {
+    var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
+    document.getElementById('user-name').textContent = me.name || me.email;
+    document.getElementById('user-avatar').src = me.picture || '';
+  } catch(e) {}
+  await findOrCreateSpreadsheet();
+}
+
+function handleSignIn() {
+  if (!tokenClient) { showToast('Google認証の準備中です', 'error'); return; }
+  tokenClient.requestAccessToken();
+}
+
+function handleSignOut() {
+  if (accessToken) google.accounts.oauth2.revoke(accessToken);
+  accessToken = null;
+  spreadsheetId = null;
+  document.getElementById('auth-out').style.display = 'block';
+  document.getElementById('auth-in').style.display = 'none';
+}
+
+// ==================== API helpers ====================
+async function apiFetch(url, options) {
+  if (!accessToken) throw new Error('未ログイン');
+  options = options || {};
+  options.headers = options.headers || {};
+  options.headers['Authorization'] = 'Bearer ' + accessToken;
+  var res = await fetch(url, options);
+  if (!res.ok) {
+    var text = ''; try { text = await res.text(); } catch(e) {}
+    throw new Error('API error ' + res.status + ': ' + text.slice(0, 200));
+  }
+  return res.json();
+}
+
+// ==================== Spreadsheet ====================
+async function findOrCreateSpreadsheet() {
+  // Search in Drive
+  var q = encodeURIComponent("name='" + SPREADSHEET_TITLE + "' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
+  var search = await apiFetch('https://www.googleapis.com/drive/v3/files?q=' + q + '&fields=files(id,name)');
+  if (search.files && search.files.length > 0) {
+    spreadsheetId = search.files[0].id;
+    return;
+  }
+  // Create new
+  var body = {
+    properties: { title: SPREADSHEET_TITLE },
+    sheets: [{
+      properties: { title: SHEET_NAME },
+      data: [{
+        startRow: 0, startColumn: 0,
+        rowData: [{ values: [
+          {userEnteredValue:{stringValue:'日付'}},
+          {userEnteredValue:{stringValue:'店名'}},
+          {userEnteredValue:{stringValue:'金額'}},
+          {userEnteredValue:{stringValue:'勘定科目'}},
+          {userEnteredValue:{stringValue:'摘要'}},
+          {userEnteredValue:{stringValue:'税区分'}},
+          {userEnteredValue:{stringValue:'登録日時'}},
+        ]}]
+      }]
+    }]
+  };
+  var created = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  spreadsheetId = created.spreadsheetId;
+  showToast('スプレッドシートを作成しました');
+}
+
+// ==================== File handling ====================
+var dropArea = null;
+
+function setupDropArea() {
+  dropArea = document.getElementById('dropArea');
+  var fileInput = document.getElementById('fileInput');
+
+  dropArea.addEventListener('click', function() { fileInput.click(); });
+  dropArea.addEventListener('dragover', function(e) { e.preventDefault(); dropArea.classList.add('dragover'); });
+  dropArea.addEventListener('dragleave', function() { dropArea.classList.remove('dragover'); });
+  dropArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dropArea.classList.remove('dragover');
+    addFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', function() { addFiles(fileInput.files); fileInput.value = ''; });
+}
+
+function addFiles(files) {
+  Array.from(files).forEach(function(file) {
+    if (!file.type.startsWith('image/')) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      pendingImages.push({ file: file, dataUrl: e.target.result });
+      renderThumbnails();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function removeImage(idx) {
+  pendingImages.splice(idx, 1);
+  renderThumbnails();
+}
+
+function renderThumbnails() {
+  var container = document.getElementById('thumbnails');
+  container.innerHTML = pendingImages.map(function(img, i) {
+    return '<div class="thumb-wrap"><img class="thumb-img" src="' + img.dataUrl + '"><button class="thumb-remove" onclick="removeImage(' + i + ')">×</button></div>';
+  }).join('');
+  document.getElementById('processBtn').disabled = pendingImages.length === 0;
+}
+
+// ==================== Gemini Vision ====================
+async function processReceipts() {
+  if (!accessToken) { showToast('Googleにログインしてください', 'error'); return; }
+  if (pendingImages.length === 0) return;
+
+  var btn = document.getElementById('processBtn');
+  var status = document.getElementById('processStatus');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span>AIが読み取り中... (' + pendingImages.length + '枚)';
+  parsedResults = [];
+
+  try {
+    for (var i = 0; i < pendingImages.length; i++) {
+      status.innerHTML = '<span class="spinner"></span>読み取り中... (' + (i + 1) + '/' + pendingImages.length + ')';
+      var result = await readReceipt(pendingImages[i].dataUrl);
+      if (result) parsedResults.push(result);
+    }
+
+    if (parsedResults.length === 0) {
+      status.innerHTML = '<span class="error">レシートを読み取れませんでした。画像を確認してください。</span>';
+      btn.disabled = false;
+      return;
+    }
+
+    renderResults();
+    status.innerHTML = '<span class="success">' + parsedResults.length + '件読み取り完了</span>';
+  } catch(e) {
+    status.innerHTML = '<span class="error">エラー: ' + escHtml(e.message) + '</span>';
+  }
+  btn.disabled = pendingImages.length === 0;
+}
+
+async function readReceipt(dataUrl) {
+  // Extract base64 data and mime type
+  var match = dataUrl.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  if (!match) return null;
+  var mimeType = match[1];
+  var base64Data = match[2];
+
+  var prompt = '以下のレシート画像を分析して、JSON形式で情報を抽出してください。\n\n' +
+    '必ず以下のJSON形式のみを出力してください（説明文不要）:\n' +
+    '{"date":"YYYY-MM-DD","store":"店名","amount":金額(数値),"category":"勘定科目","description":"品目の概要","tax":"課税区分"}\n\n' +
+    '勘定科目は以下から選択: 旅費交通費, 通信費, 消耗品費, 会議費, 交際費, 新聞図書費, 地代家賃, 水道光熱費, 広告宣伝費, 外注費, 支払手数料, 福利厚生費, 雑費\n' +
+    '税区分は: 課税仕入10%, 課税仕入8%(軽減), 非課税, 不課税 から選択\n' +
+    '日付が読み取れない場合は今日の日付を使用。金額は税込み総額。';
+
+  var body = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inlineData: { mimeType: mimeType, data: base64Data } }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 1024,
+      responseMimeType: 'application/json'
+    }
+  };
+
+  var response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + accessToken
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    var errText = ''; try { errText = await response.text(); } catch(e) {}
+    throw new Error('Gemini API エラー (' + response.status + '): ' + errText.slice(0, 200));
+  }
+
+  var data = await response.json();
+  var text = data.candidates[0].content.parts[0].text;
+  var jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  var parsed = JSON.parse(jsonMatch[0]);
+  // Validate
+  if (!parsed.amount || parsed.amount <= 0) return null;
+  parsed.date = parsed.date || new Date().toISOString().slice(0, 10);
+  parsed.store = parsed.store || '不明';
+  parsed.category = parsed.category || '雑費';
+  parsed.description = parsed.description || '';
+  parsed.tax = parsed.tax || '課税仕入10%';
+  return parsed;
+}
+
+// ==================== Results display ====================
+var CATEGORIES = ['旅費交通費','通信費','消耗品費','会議費','交際費','新聞図書費','地代家賃','水道光熱費','広告宣伝費','外注費','支払手数料','福利厚生費','雑費'];
+var TAX_TYPES = ['課税仕入10%','課税仕入8%(軽減)','非課税','不課税'];
+
+function renderResults() {
+  var container = document.getElementById('results');
+  container.innerHTML = parsedResults.map(function(r, i) {
+    var catOptions = CATEGORIES.map(function(c) { return '<option' + (c === r.category ? ' selected' : '') + '>' + c + '</option>'; }).join('');
+    var taxOptions = TAX_TYPES.map(function(t) { return '<option' + (t === r.tax ? ' selected' : '') + '>' + t + '</option>'; }).join('');
+    return '<div class="result-item" data-idx="' + i + '">' +
+      '<div class="field"><span class="label">日付</span><input type="date" value="' + escHtml(r.date) + '" onchange="parsedResults[' + i + '].date=this.value"></div>' +
+      '<div class="field"><span class="label">店名</span><input type="text" value="' + escHtml(r.store) + '" onchange="parsedResults[' + i + '].store=this.value"></div>' +
+      '<div class="field"><span class="label">勘定科目</span><select onchange="parsedResults[' + i + '].category=this.value">' + catOptions + '</select></div>' +
+      '<div class="field"><span class="label">摘要</span><input type="text" value="' + escHtml(r.description) + '" onchange="parsedResults[' + i + '].description=this.value"></div>' +
+      '<div class="field"><span class="label">税区分</span><select onchange="parsedResults[' + i + '].tax=this.value">' + taxOptions + '</select></div>' +
+      '<div class="amount">¥' + Number(r.amount).toLocaleString() + '</div>' +
+      '</div>';
+  }).join('');
+  document.getElementById('resultsCard').style.display = 'block';
+}
+
+function clearResults() {
+  parsedResults = [];
+  pendingImages = [];
+  renderThumbnails();
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('resultsCard').style.display = 'none';
+  document.getElementById('processStatus').innerHTML = '';
+  document.getElementById('saveStatus').innerHTML = '';
+}
+
+// ==================== Save to Sheets ====================
+async function saveToSheets() {
+  if (!accessToken) { showToast('Googleにログインしてください', 'error'); return; }
+  if (!spreadsheetId) { showToast('スプレッドシートが見つかりません', 'error'); return; }
+  if (parsedResults.length === 0) return;
+
+  var btn = document.getElementById('saveBtn');
+  var status = document.getElementById('saveStatus');
+  btn.disabled = true;
+  status.innerHTML = '<span class="spinner"></span>保存中...';
+
+  try {
+    var now = new Date().toLocaleString('ja-JP');
+    var values = parsedResults.map(function(r) {
+      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now];
+    });
+
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:G:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: values }),
+    });
+
+    status.innerHTML = '<span class="success">' + parsedResults.length + '件保存しました</span>';
+    showToast(parsedResults.length + '件の経費を保存しました');
+
+    // Clear after save
+    parsedResults = [];
+    pendingImages = [];
+    renderThumbnails();
+    setTimeout(function() {
+      document.getElementById('resultsCard').style.display = 'none';
+      document.getElementById('processStatus').innerHTML = '';
+    }, 2000);
+
+    loadHistory();
+  } catch(e) {
+    status.innerHTML = '<span class="error">保存エラー: ' + escHtml(e.message) + '</span>';
+  }
+  btn.disabled = false;
+}
+
+// ==================== History ====================
+async function loadHistory() {
+  if (!accessToken || !spreadsheetId) {
+    showToast('Googleにログインしてください', 'error');
+    return;
+  }
+
+  var area = document.getElementById('historyArea');
+  area.innerHTML = '<div class="status"><span class="spinner"></span>読み込み中...</div>';
+
+  try {
+    var data = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:G');
+    var rows = data.values || [];
+    if (rows.length <= 1) {
+      area.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4CB;</div><p>まだ経費が保存されていません</p></div>';
+      return;
+    }
+
+    // Skip header, show most recent first
+    var dataRows = rows.slice(1).reverse().slice(0, 50);
+    var total = dataRows.reduce(function(sum, r) { return sum + (Number(r[2]) || 0); }, 0);
+
+    var html = '<div style="text-align:right;font-size:0.9em;margin-bottom:8px;color:#8a7e6e">直近' + dataRows.length + '件 / 合計 <strong style="color:#a0522d">¥' + total.toLocaleString() + '</strong></div>';
+    html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th style="text-align:right">金額</th></tr></thead><tbody>';
+    html += dataRows.map(function(r) {
+      return '<tr><td>' + escHtml(r[0] || '') + '</td><td>' + escHtml(r[1] || '') + '</td><td>' + escHtml(r[3] || '') + '</td><td class="amount-cell">¥' + Number(r[2] || 0).toLocaleString() + '</td></tr>';
+    }).join('');
+    html += '</tbody></table>';
+    area.innerHTML = html;
+  } catch(e) {
+    area.innerHTML = '<div class="status error">読み込みエラー: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+// ==================== Utilities ====================
+function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function showToast(msg, type) {
+  var existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  var t = document.createElement('div');
+  t.className = 'toast' + (type === 'error' ? ' error' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function() { t.remove(); }, 3000);
+}
+
+// ==================== Init ====================
+function init() {
+  setupDropArea();
+  if (typeof google !== 'undefined' && google.accounts) {
+    initGIS();
+  } else {
+    // Wait for GIS to load
+    var check = setInterval(function() {
+      if (typeof google !== 'undefined' && google.accounts) {
+        clearInterval(check);
+        initGIS();
+      }
+    }, 200);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>
