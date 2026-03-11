@@ -436,12 +436,12 @@ footer a { color: #a0522d; text-decoration: none; }
   <!-- ===== Tab 2: ダッシュボード ===== -->
   <div class="tab-panel" id="panel-dash">
     <div class="card">
-      <button class="btn-outline" onclick="loadDashboard()" style="width:100%" id="dashLoadBtn">データを読み込む</button>
+      <div id="dashLoadMsg" style="text-align:center;padding:32px;color:#8a7e6e"><span class="spinner"></span>読み込み中...</div>
       <div id="dashArea" style="display:none">
         <div class="dash-tabs">
-          <button class="dash-tab active" onclick="switchDashTab('monthly')">月別推移</button>
-          <button class="dash-tab" onclick="switchDashTab('category')">カテゴリ別</button>
-          <button class="dash-tab" onclick="switchDashTab('history')">明細</button>
+          <button class="dash-tab active" onclick="switchDashTab('monthly',this)">月別推移</button>
+          <button class="dash-tab" onclick="switchDashTab('category',this)">カテゴリ別</button>
+          <button class="dash-tab" onclick="switchDashTab('history',this)">明細</button>
         </div>
 
         <div id="dash-monthly">
@@ -570,6 +570,7 @@ function handleSignOut() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken);
   accessToken = null;
   spreadsheetId = null;
+  driveFolderId = null;
   document.getElementById('auth-out').style.display = 'block';
   document.getElementById('auth-in').style.display = 'none';
 }
@@ -872,7 +873,7 @@ async function saveToSheets() {
       return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, driveLinks[idx] || ''];
     });
 
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
@@ -908,33 +909,37 @@ var catMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
 var histMonth = new Date().toISOString().slice(0, 7);
 
 async function loadDashboard() {
-  if (!accessToken || !spreadsheetId) { showToast('Googleにログインしてください', 'error'); return; }
+  if (!accessToken || !spreadsheetId) {
+    document.getElementById('dashLoadMsg').innerHTML = '<p style="color:#8a7e6e">Googleにログインすると経費データが表示されます</p>';
+    return;
+  }
 
-  document.getElementById('dashLoadBtn').disabled = true;
-  document.getElementById('dashLoadBtn').textContent = '読み込み中...';
+  document.getElementById('dashLoadMsg').innerHTML = '<span class="spinner"></span>読み込み中...';
+  document.getElementById('dashLoadMsg').style.display = 'block';
 
   try {
-    var data = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:G');
+    var data = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:G');
     var rows = data.values || [];
-    if (rows.length <= 1) { showToast('データがありません'); document.getElementById('dashLoadBtn').disabled = false; document.getElementById('dashLoadBtn').textContent = 'データを読み込む'; return; }
+    if (rows.length <= 1) {
+      document.getElementById('dashLoadMsg').innerHTML = '<p style="color:#8a7e6e">まだデータがありません。レシートを読み取って保存してください。</p>';
+      return;
+    }
 
     allExpenseRows = rows.slice(1).map(function(r) {
       return { date: r[0] || '', store: r[1] || '', amount: Number(r[2]) || 0, category: r[3] || '', description: r[4] || '', tax: r[5] || '' };
     });
 
     document.getElementById('dashArea').style.display = 'block';
-    document.getElementById('dashLoadBtn').style.display = 'none';
+    document.getElementById('dashLoadMsg').style.display = 'none';
     renderMonthlyView();
   } catch(e) {
-    showToast('読み込みエラー: ' + e.message, 'error');
-    document.getElementById('dashLoadBtn').disabled = false;
-    document.getElementById('dashLoadBtn').textContent = 'データを読み込む';
+    document.getElementById('dashLoadMsg').innerHTML = '<p style="color:#d32f2f">読み込みエラー: ' + escHtml(e.message) + '</p>';
   }
 }
 
-function switchDashTab(tab) {
+function switchDashTab(tab, el) {
   document.querySelectorAll('.dash-tab').forEach(function(t) { t.classList.remove('active'); });
-  event.target.classList.add('active');
+  (el || event.currentTarget).classList.add('active');
   document.getElementById('dash-monthly').style.display = tab === 'monthly' ? 'block' : 'none';
   document.getElementById('dash-category').style.display = tab === 'category' ? 'block' : 'none';
   document.getElementById('dash-history').style.display = tab === 'history' ? 'block' : 'none';
@@ -1230,7 +1235,7 @@ async function useTemplate(idx) {
   var today = new Date().toISOString().slice(0, 10);
   var values = [[today, t.store, t.amount, t.category, t.description, t.tax, now, '']];
   try {
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
@@ -1307,7 +1312,7 @@ function switchTab(tab, btn) {
   document.getElementById('panel-' + tab).classList.add('active');
   if (btn) btn.classList.add('active');
   // Auto-load dashboard when switching to it
-  if (tab === 'dash' && allExpenseRows.length === 0 && accessToken && spreadsheetId) {
+  if (tab === 'dash' && allExpenseRows.length === 0) {
     loadDashboard();
   }
 }
