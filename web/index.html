@@ -511,6 +511,12 @@ footer a { color: #a0522d; text-decoration: none; }
       <p style="font-size:0.75em;color:#999;margin-top:8px">※ ダッシュボードのデータ読み込み後に使用できます</p>
     </div>
 
+    <div class="card">
+      <h2>電子帳簿保存法</h2>
+      <p style="font-size:0.85em;color:#8a7e6e;margin-bottom:12px">証憑はGoogle Driveに自動保存され、変更履歴はスプレッドシートに記録されます。事務処理規程のテンプレートをダウンロードできます。</p>
+      <button class="btn-outline" onclick="downloadJimuKitei()">事務処理規程テンプレート（テキスト）</button>
+    </div>
+
     <footer>
       <a href="https://github.com/Choreia/Expense" target="_blank">GitHub</a> &nbsp;|&nbsp;
       <a href="https://github.com/Choreia/Books" target="_blank">Choreia Books</a> &nbsp;|&nbsp;
@@ -530,9 +536,11 @@ var CLIENT_ID = '267211003481-pck8amdusjfedr9gvvlje4uke53ig4lh.apps.googleuserco
 var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/generative-language.retriever';
 var SPREADSHEET_TITLE = 'Choreia Expense データ';
 var SHEET_NAME = '経費';
+var LOG_SHEET_NAME = '変更履歴';
 
 var tokenClient = null;
 var accessToken = null;
+var currentUserName = '';
 var spreadsheetId = null;
 var driveFolderId = null; // 電帳法: 証憑保存フォルダ
 var pendingImages = []; // {file, dataUrl}
@@ -560,7 +568,8 @@ async function onTokenResponse(resp) {
   document.getElementById('auth-in').style.display = 'flex';
   try {
     var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
-    document.getElementById('user-name').textContent = me.name || me.email;
+    currentUserName = me.name || me.email;
+    document.getElementById('user-name').textContent = currentUserName;
     var avatarEl = document.getElementById('user-avatar');
     if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
     else { avatarEl.style.display = 'none'; }
@@ -604,6 +613,7 @@ async function findOrCreateSpreadsheet() {
   var search = await apiFetch('https://www.googleapis.com/drive/v3/files?q=' + q + '&fields=files(id,name)');
   if (search.files && search.files.length > 0) {
     spreadsheetId = search.files[0].id;
+    await ensureLogSheet();
     return;
   }
   // Create new
@@ -624,6 +634,19 @@ async function findOrCreateSpreadsheet() {
           {userEnteredValue:{stringValue:'証憑URL'}},
         ]}]
       }]
+    },{
+      properties: { title: LOG_SHEET_NAME },
+      data: [{
+        startRow: 0, startColumn: 0,
+        rowData: [{ values: [
+          {userEnteredValue:{stringValue:'操作日時'}},
+          {userEnteredValue:{stringValue:'操作種別'}},
+          {userEnteredValue:{stringValue:'対象行'}},
+          {userEnteredValue:{stringValue:'変更前'}},
+          {userEnteredValue:{stringValue:'変更後'}},
+          {userEnteredValue:{stringValue:'操作者'}},
+        ]}]
+      }]
     }]
   };
   var created = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets', {
@@ -633,6 +656,40 @@ async function findOrCreateSpreadsheet() {
   });
   spreadsheetId = created.spreadsheetId;
   showToast('スプレッドシートを作成しました');
+}
+
+// ==================== 変更履歴ログ（電帳法） ====================
+async function ensureLogSheet() {
+  try {
+    var meta = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '?fields=sheets.properties.title');
+    var exists = meta.sheets.some(function(s) { return s.properties.title === LOG_SHEET_NAME; });
+    if (exists) return;
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + ':batchUpdate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{
+        addSheet: { properties: { title: LOG_SHEET_NAME } }
+      }] }),
+    });
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(LOG_SHEET_NAME) + '!A1:F1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [['操作日時', '操作種別', '対象行', '変更前', '変更後', '操作者']] }),
+    });
+  } catch(e) { /* ignore */ }
+}
+
+async function appendChangeLog(type, targetRow, before, after) {
+  if (!spreadsheetId) return;
+  var now = new Date().toLocaleString('ja-JP');
+  var values = [[now, type, targetRow, before, after, currentUserName]];
+  try {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(LOG_SHEET_NAME) + '!A:F:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: values }),
+    });
+  } catch(e) { /* ログ記録失敗は無視 */ }
 }
 
 // ==================== Drive folder (電帳法) ====================
@@ -886,6 +943,13 @@ async function saveToSheets() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
     });
+
+    // 電帳法: 変更履歴に新規登録を記録
+    for (var j = 0; j < parsedResults.length; j++) {
+      var r = parsedResults[j];
+      var detail = r.date + ' / ' + r.store + ' / ¥' + r.amount + ' / ' + r.category;
+      appendChangeLog('新規登録', '', '', detail);
+    }
 
     var savedWithReceipt = driveLinks.filter(function(l) { return l; }).length;
     var msg = parsedResults.length + '件保存しました';
@@ -1252,6 +1316,66 @@ async function useTemplate(idx) {
   } catch(e) {
     showToast('登録エラー: ' + e.message, 'error');
   }
+}
+
+// ==================== 事務処理規程テンプレート ====================
+function downloadJimuKitei() {
+  var text = [
+    '電子取引データの訂正及び削除の防止に関する事務処理規程',
+    '',
+    '（目的）',
+    '第1条 この規程は、電子帳簿保存法第7条に基づき、電子取引の取引情報に係る',
+    '電磁的記録の適正な保存を確保するために必要な事項を定める。',
+    '',
+    '（適用範囲）',
+    '第2条 この規程は、当社（事業者）における電子取引の取引情報に係る',
+    '電磁的記録の保存に適用する。',
+    '',
+    '（管理責任者）',
+    '第3条 電子取引データの管理責任者は、________________とする。',
+    '',
+    '（電子取引の範囲）',
+    '第4条 この規程における電子取引とは、以下を含む。',
+    '  (1) Choreia Expense によるレシート画像の電子保存',
+    '  (2) その他電子的に授受した請求書・領収書等',
+    '',
+    '（保存方法）',
+    '第5条 電子取引データは以下の方法で保存する。',
+    '  (1) レシート画像はGoogle Drive「Choreia Expense 証憑」フォルダに保存する',
+    '  (2) 取引データ（日付・取引先・金額・勘定科目）はGoogle Sheetsに記録する',
+    '  (3) 証憑画像とスプレッドシートはURLで紐付けする',
+    '',
+    '（検索要件）',
+    '第6条 保存した電子取引データは、以下の項目で検索できるようにする。',
+    '  (1) 取引年月日',
+    '  (2) 取引金額',
+    '  (3) 取引先名称',
+    '',
+    '（訂正・削除の防止）',
+    '第7条 電子取引データの訂正及び削除に関して、以下のとおり定める。',
+    '  (1) 保存したデータの訂正・削除は原則として禁止する',
+    '  (2) やむを得ず訂正・削除を行う場合は、変更履歴シートに記録する',
+    '  (3) Google Driveの版管理機能により変更履歴を保持する',
+    '  (4) 訂正・削除の記録には、日時・操作者・変更前後の内容を含める',
+    '',
+    '（保存期間）',
+    '第8条 電子取引データの保存期間は、法定保存期間（7年間）とする。',
+    '  法人で欠損金の繰越控除を受ける場合は10年間とする。',
+    '',
+    '（施行日）',
+    '第9条 この規程は、____年__月__日から施行する。',
+    '',
+    '',
+    '※ このテンプレートは一般的な参考例です。',
+    '  税理士等の専門家に確認のうえ、事業の実態に合わせて修正してください。',
+  ].join('\r\n');
+
+  var blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '電子取引データ事務処理規程.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ==================== Monthly Report (Print/PDF) ====================
