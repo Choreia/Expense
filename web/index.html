@@ -827,7 +827,7 @@ function renderResults() {
       '<div class="field"><span class="label">勘定科目</span><select onchange="parsedResults[' + i + '].category=this.value">' + catOptions + '</select></div>' +
       '<div class="field"><span class="label">摘要</span><input type="text" value="' + escHtml(r.description) + '" onchange="parsedResults[' + i + '].description=this.value"></div>' +
       '<div class="field"><span class="label">税区分</span><select onchange="parsedResults[' + i + '].tax=this.value">' + taxOptions + '</select></div>' +
-      '<div class="amount">¥' + Number(r.amount).toLocaleString() + '</div>' +
+      '<div class="field"><span class="label">金額</span><input type="number" value="' + Number(r.amount) + '" min="0" onchange="parsedResults[' + i + '].amount=Number(this.value)"></div>' +
       '</div>';
   }).join('');
   document.getElementById('resultsCard').style.display = 'block';
