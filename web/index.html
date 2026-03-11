@@ -555,7 +555,9 @@ async function onTokenResponse(resp) {
   try {
     var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
     document.getElementById('user-name').textContent = me.name || me.email;
-    document.getElementById('user-avatar').src = me.picture || '';
+    var avatarEl = document.getElementById('user-avatar');
+    if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
+    else { avatarEl.style.display = 'none'; }
   } catch(e) {}
   await findOrCreateSpreadsheet();
   await findOrCreateDriveFolder();
