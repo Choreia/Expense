@@ -545,6 +545,12 @@ function initGIS() {
     scope: SCOPES,
     callback: onTokenResponse,
   });
+  // ページ読み込み時にサイレント再認証を試行
+  tryAutoSignIn();
+}
+
+function tryAutoSignIn() {
+  tokenClient.requestAccessToken({ prompt: '' });
 }
 
 async function onTokenResponse(resp) {
