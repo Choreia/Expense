@@ -382,6 +382,19 @@ footer a { color: #a0522d; text-decoration: none; }
     </div>
   </div>
 
+  <!-- Export -->
+  <div class="card">
+    <h2>エクスポート</h2>
+    <p style="font-size:0.85em;color:#8a7e6e;margin-bottom:12px">経費データを会計ソフトに取り込めるCSV形式でダウンロードできます。</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn-outline" onclick="exportCSV('generic')">汎用CSV</button>
+      <button class="btn-outline" onclick="exportCSV('yayoi')">弥生会計フォーマット</button>
+      <button class="btn-outline" onclick="exportCSV('freee')">freeeフォーマット</button>
+      <button class="btn-outline" onclick="exportCSV('moneyforward')">マネーフォワードフォーマット</button>
+    </div>
+    <p style="font-size:0.75em;color:#999;margin-top:8px">※ ダッシュボードの「データを読み込む」を先に実行してください</p>
+  </div>
+
   <footer>
     <a href="https://github.com/Choreia/Expense" target="_blank">GitHub</a> &nbsp;|&nbsp;
     <a href="https://github.com/Choreia/Books" target="_blank">Choreia Books</a> &nbsp;|&nbsp;
@@ -862,6 +875,75 @@ function renderHistoryView() {
 
 // Keep old loadHistory as alias
 function loadHistory() { loadDashboard(); }
+
+// ==================== Export ====================
+function exportCSV(format) {
+  if (allExpenseRows.length === 0) { showToast('先にデータを読み込んでください', 'error'); return; }
+
+  var bom = '\uFEFF'; // UTF-8 BOM for Excel
+  var lines = [];
+  var filename = 'choreia_expense_';
+
+  switch (format) {
+    case 'generic':
+      lines.push(['日付','店名','金額','勘定科目','摘要','税区分']);
+      allExpenseRows.forEach(function(r) {
+        lines.push([r.date, r.store, r.amount, r.category, r.description, r.tax]);
+      });
+      filename += 'generic.csv';
+      break;
+
+    case 'yayoi':
+      // 弥生会計インポート形式
+      lines.push(['日付','借方勘定科目','借方金額','貸方勘定科目','貸方金額','摘要','税区分']);
+      allExpenseRows.forEach(function(r) {
+        var date = r.date.replace(/-/g, '/');
+        lines.push([date, r.category, r.amount, '現金', r.amount, r.store + ' ' + r.description, r.tax]);
+      });
+      filename += 'yayoi.csv';
+      break;
+
+    case 'freee':
+      // freee インポート形式
+      lines.push(['収支区分','管理番号','発生日','決済期日','取引先','勘定科目','税区分','金額','備考']);
+      allExpenseRows.forEach(function(r) {
+        var freeTax = r.tax.replace('課税仕入', '課対仕入');
+        lines.push(['支出', '', r.date, r.date, r.store, r.category, freeTax, r.amount, r.description]);
+      });
+      filename += 'freee.csv';
+      break;
+
+    case 'moneyforward':
+      // マネーフォワード仕訳インポート形式
+      lines.push(['取引日','借方勘定科目','借方補助科目','借方税区分','借方金額','貸方勘定科目','貸方補助科目','貸方税区分','貸方金額','摘要']);
+      allExpenseRows.forEach(function(r) {
+        lines.push([r.date, r.category, '', r.tax, r.amount, '現金', '', '対象外', r.amount, r.store + ' ' + r.description]);
+      });
+      filename += 'moneyforward.csv';
+      break;
+  }
+
+  var csv = bom + lines.map(function(row) {
+    return row.map(function(cell) {
+      var s = String(cell);
+      if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }).join(',');
+  }).join('\r\n');
+
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(format + '形式でダウンロードしました');
+}
 
 // ==================== Utilities ====================
 function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
