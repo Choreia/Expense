@@ -248,6 +248,47 @@ footer a { color: #a0522d; text-decoration: none; }
 /* Empty state */
 .empty-state { text-align: center; padding: 32px; color: #8a7e6e; }
 .empty-state .icon { font-size: 2.5em; margin-bottom: 8px; }
+
+/* Dashboard */
+.dash-tabs {
+  display: flex; gap: 0; margin-bottom: 16px;
+  background: #f3efe9; border-radius: 10px; padding: 3px;
+}
+.dash-tab {
+  flex: 1; padding: 8px; text-align: center;
+  border: none; background: none; border-radius: 8px;
+  font-size: 0.85em; font-weight: 600; color: #8a7e6e;
+  cursor: pointer; font-family: inherit; transition: all 0.2s;
+}
+.dash-tab.active { background: #fff; color: #2c2418; box-shadow: 0 1px 3px rgba(44,36,24,0.1); }
+.month-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.month-nav button {
+  background: none; border: 1px solid #d4cdc2; border-radius: 8px;
+  padding: 6px 12px; cursor: pointer; font-family: inherit; font-size: 0.9em; color: #2c2418;
+}
+.month-nav button:hover { background: #f3efe9; }
+.month-nav .month-label { font-weight: 700; font-size: 1.1em; }
+.bar-chart { display: flex; flex-direction: column; gap: 8px; }
+.bar-row {
+  display: flex; align-items: center; gap: 8px; font-size: 0.85em;
+}
+.bar-label { width: 90px; text-align: right; color: #8a7e6e; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar-track { flex: 1; height: 28px; background: #f3efe9; border-radius: 6px; overflow: hidden; position: relative; }
+.bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s ease; display: flex; align-items: center; padding-left: 8px; font-size: 12px; font-weight: 600; color: #fff; min-width: 0; }
+.bar-amount { width: 90px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.monthly-bars .bar-fill { background: #a0522d; }
+.category-bars .bar-fill { background: #4a6741; }
+.dash-summary {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;
+}
+.dash-stat {
+  background: #faf8f5; border-radius: 10px; padding: 16px; text-align: center;
+}
+.dash-stat .stat-value { font-size: 1.4em; font-weight: 700; color: #a0522d; }
+.dash-stat .stat-label { font-size: 0.8em; color: #8a7e6e; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -296,16 +337,49 @@ footer a { color: #a0522d; text-decoration: none; }
     <div class="status" id="saveStatus"></div>
   </div>
 
-  <!-- History -->
+  <!-- Dashboard -->
   <div class="card">
-    <h2>保存済み経費</h2>
-    <div id="historyArea">
-      <div class="empty-state">
-        <div class="icon">&#x1F4CB;</div>
-        <p>まだ経費が保存されていません</p>
+    <h2>経費ダッシュボード</h2>
+    <button class="btn-outline" onclick="loadDashboard()" style="width:100%" id="dashLoadBtn">データを読み込む</button>
+    <div id="dashArea" style="display:none">
+      <div class="dash-tabs">
+        <button class="dash-tab active" onclick="switchDashTab('monthly')">月別推移</button>
+        <button class="dash-tab" onclick="switchDashTab('category')">カテゴリ別</button>
+        <button class="dash-tab" onclick="switchDashTab('history')">明細</button>
+      </div>
+
+      <!-- Monthly view -->
+      <div id="dash-monthly">
+        <div class="dash-summary" id="dashSummary"></div>
+        <div class="month-nav">
+          <button onclick="changeYear(-1)">&larr;</button>
+          <span class="month-label" id="dashYearLabel"></span>
+          <button onclick="changeYear(1)">&rarr;</button>
+        </div>
+        <div class="bar-chart monthly-bars" id="monthlyChart"></div>
+      </div>
+
+      <!-- Category view -->
+      <div id="dash-category" style="display:none">
+        <div class="month-nav">
+          <button onclick="changeCatMonth(-1)">&larr;</button>
+          <span class="month-label" id="catMonthLabel"></span>
+          <button onclick="changeCatMonth(1)">&rarr;</button>
+        </div>
+        <div class="dash-summary" id="catSummary"></div>
+        <div class="bar-chart category-bars" id="categoryChart"></div>
+      </div>
+
+      <!-- History list -->
+      <div id="dash-history" style="display:none">
+        <div class="month-nav">
+          <button onclick="changeHistMonth(-1)">&larr;</button>
+          <span class="month-label" id="histMonthLabel"></span>
+          <button onclick="changeHistMonth(1)">&rarr;</button>
+        </div>
+        <div id="historyTable"></div>
       </div>
     </div>
-    <button class="btn-outline" onclick="loadHistory()" style="margin-top:12px;width:100%">履歴を読み込む</button>
   </div>
 
   <footer>
@@ -623,38 +697,171 @@ async function saveToSheets() {
 }
 
 // ==================== History ====================
-async function loadHistory() {
-  if (!accessToken || !spreadsheetId) {
-    showToast('Googleにログインしてください', 'error');
-    return;
-  }
+// ==================== Dashboard ====================
+var allExpenseRows = []; // [{date, store, amount, category, description, tax}]
+var dashYear = new Date().getFullYear();
+var catMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+var histMonth = new Date().toISOString().slice(0, 7);
 
-  var area = document.getElementById('historyArea');
-  area.innerHTML = '<div class="status"><span class="spinner"></span>読み込み中...</div>';
+async function loadDashboard() {
+  if (!accessToken || !spreadsheetId) { showToast('Googleにログインしてください', 'error'); return; }
+
+  document.getElementById('dashLoadBtn').disabled = true;
+  document.getElementById('dashLoadBtn').textContent = '読み込み中...';
 
   try {
     var data = await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + SHEET_NAME + '!A:G');
     var rows = data.values || [];
-    if (rows.length <= 1) {
-      area.innerHTML = '<div class="empty-state"><div class="icon">&#x1F4CB;</div><p>まだ経費が保存されていません</p></div>';
-      return;
-    }
+    if (rows.length <= 1) { showToast('データがありません'); document.getElementById('dashLoadBtn').disabled = false; document.getElementById('dashLoadBtn').textContent = 'データを読み込む'; return; }
 
-    // Skip header, show most recent first
-    var dataRows = rows.slice(1).reverse().slice(0, 50);
-    var total = dataRows.reduce(function(sum, r) { return sum + (Number(r[2]) || 0); }, 0);
+    allExpenseRows = rows.slice(1).map(function(r) {
+      return { date: r[0] || '', store: r[1] || '', amount: Number(r[2]) || 0, category: r[3] || '', description: r[4] || '', tax: r[5] || '' };
+    });
 
-    var html = '<div style="text-align:right;font-size:0.9em;margin-bottom:8px;color:#8a7e6e">直近' + dataRows.length + '件 / 合計 <strong style="color:#a0522d">¥' + total.toLocaleString() + '</strong></div>';
-    html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th style="text-align:right">金額</th></tr></thead><tbody>';
-    html += dataRows.map(function(r) {
-      return '<tr><td>' + escHtml(r[0] || '') + '</td><td>' + escHtml(r[1] || '') + '</td><td>' + escHtml(r[3] || '') + '</td><td class="amount-cell">¥' + Number(r[2] || 0).toLocaleString() + '</td></tr>';
-    }).join('');
-    html += '</tbody></table>';
-    area.innerHTML = html;
+    document.getElementById('dashArea').style.display = 'block';
+    document.getElementById('dashLoadBtn').style.display = 'none';
+    renderMonthlyView();
   } catch(e) {
-    area.innerHTML = '<div class="status error">読み込みエラー: ' + escHtml(e.message) + '</div>';
+    showToast('読み込みエラー: ' + e.message, 'error');
+    document.getElementById('dashLoadBtn').disabled = false;
+    document.getElementById('dashLoadBtn').textContent = 'データを読み込む';
   }
 }
+
+function switchDashTab(tab) {
+  document.querySelectorAll('.dash-tab').forEach(function(t) { t.classList.remove('active'); });
+  event.target.classList.add('active');
+  document.getElementById('dash-monthly').style.display = tab === 'monthly' ? 'block' : 'none';
+  document.getElementById('dash-category').style.display = tab === 'category' ? 'block' : 'none';
+  document.getElementById('dash-history').style.display = tab === 'history' ? 'block' : 'none';
+  if (tab === 'monthly') renderMonthlyView();
+  if (tab === 'category') renderCategoryView();
+  if (tab === 'history') renderHistoryView();
+}
+
+// --- Monthly bar chart ---
+function changeYear(delta) { dashYear += delta; renderMonthlyView(); }
+
+function renderMonthlyView() {
+  var months = {};
+  var yearTotal = 0;
+  var yearCount = 0;
+  for (var m = 1; m <= 12; m++) {
+    var key = dashYear + '-' + String(m).padStart(2, '0');
+    months[key] = 0;
+  }
+  allExpenseRows.forEach(function(r) {
+    var ym = r.date.slice(0, 7);
+    if (ym.startsWith(String(dashYear))) {
+      months[ym] = (months[ym] || 0) + r.amount;
+      yearTotal += r.amount;
+      yearCount++;
+    }
+  });
+
+  document.getElementById('dashYearLabel').textContent = dashYear + '年';
+
+  // Summary
+  var avgMonth = yearCount > 0 ? Math.round(yearTotal / 12) : 0;
+  document.getElementById('dashSummary').innerHTML =
+    '<div class="dash-stat"><div class="stat-value">¥' + yearTotal.toLocaleString() + '</div><div class="stat-label">' + dashYear + '年 合計</div></div>' +
+    '<div class="dash-stat"><div class="stat-value">¥' + avgMonth.toLocaleString() + '</div><div class="stat-label">月平均</div></div>';
+
+  // Chart
+  var max = Math.max.apply(null, Object.values(months)) || 1;
+  var monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  var html = '';
+  Object.keys(months).sort().forEach(function(key, i) {
+    var val = months[key];
+    var pct = Math.round(val / max * 100);
+    html += '<div class="bar-row">' +
+      '<div class="bar-label">' + monthNames[i] + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + Math.max(pct, val > 0 ? 2 : 0) + '%">' + (pct > 15 ? '¥' + val.toLocaleString() : '') + '</div></div>' +
+      '<div class="bar-amount">' + (val > 0 ? '¥' + val.toLocaleString() : '-') + '</div>' +
+      '</div>';
+  });
+  document.getElementById('monthlyChart').innerHTML = html;
+}
+
+// --- Category view ---
+function changeCatMonth(delta) {
+  var d = new Date(catMonth + '-01');
+  d.setMonth(d.getMonth() + delta);
+  catMonth = d.toISOString().slice(0, 7);
+  renderCategoryView();
+}
+
+function renderCategoryView() {
+  var cats = {};
+  var total = 0;
+  var count = 0;
+  allExpenseRows.forEach(function(r) {
+    if (r.date.slice(0, 7) === catMonth) {
+      cats[r.category] = (cats[r.category] || 0) + r.amount;
+      total += r.amount;
+      count++;
+    }
+  });
+
+  var parts = catMonth.split('-');
+  document.getElementById('catMonthLabel').textContent = parts[0] + '年' + Number(parts[1]) + '月';
+
+  document.getElementById('catSummary').innerHTML =
+    '<div class="dash-stat"><div class="stat-value">¥' + total.toLocaleString() + '</div><div class="stat-label">月合計</div></div>' +
+    '<div class="dash-stat"><div class="stat-value">' + count + '件</div><div class="stat-label">取引数</div></div>';
+
+  // Sort by amount descending
+  var sorted = Object.entries(cats).sort(function(a, b) { return b[1] - a[1]; });
+  var max = sorted.length > 0 ? sorted[0][1] : 1;
+
+  if (sorted.length === 0) {
+    document.getElementById('categoryChart').innerHTML = '<div class="empty-state"><p>この月のデータはありません</p></div>';
+    return;
+  }
+
+  var html = sorted.map(function(entry) {
+    var pct = Math.round(entry[1] / max * 100);
+    return '<div class="bar-row">' +
+      '<div class="bar-label">' + escHtml(entry[0]) + '</div>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + Math.max(pct, 2) + '%">' + (pct > 20 ? '¥' + entry[1].toLocaleString() : '') + '</div></div>' +
+      '<div class="bar-amount">¥' + entry[1].toLocaleString() + '</div>' +
+      '</div>';
+  }).join('');
+  document.getElementById('categoryChart').innerHTML = html;
+}
+
+// --- History list ---
+function changeHistMonth(delta) {
+  var d = new Date(histMonth + '-01');
+  d.setMonth(d.getMonth() + delta);
+  histMonth = d.toISOString().slice(0, 7);
+  renderHistoryView();
+}
+
+function renderHistoryView() {
+  var filtered = allExpenseRows.filter(function(r) { return r.date.slice(0, 7) === histMonth; });
+  filtered.sort(function(a, b) { return b.date.localeCompare(a.date); });
+
+  var parts = histMonth.split('-');
+  document.getElementById('histMonthLabel').textContent = parts[0] + '年' + Number(parts[1]) + '月';
+
+  if (filtered.length === 0) {
+    document.getElementById('historyTable').innerHTML = '<div class="empty-state"><p>この月のデータはありません</p></div>';
+    return;
+  }
+
+  var total = filtered.reduce(function(s, r) { return s + r.amount; }, 0);
+  var html = '<div style="text-align:right;font-size:0.9em;margin-bottom:8px;color:#8a7e6e">' + filtered.length + '件 / 合計 <strong style="color:#a0522d">¥' + total.toLocaleString() + '</strong></div>';
+  html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th style="text-align:right">金額</th></tr></thead><tbody>';
+  html += filtered.map(function(r) {
+    return '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.store) + '</td><td>' + escHtml(r.category) + '</td><td class="amount-cell">¥' + r.amount.toLocaleString() + '</td></tr>';
+  }).join('');
+  html += '</tbody></table>';
+  document.getElementById('historyTable').innerHTML = html;
+}
+
+// Keep old loadHistory as alias
+function loadHistory() { loadDashboard(); }
 
 // ==================== Utilities ====================
 function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
