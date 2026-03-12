@@ -867,12 +867,18 @@ async function processReceipts() {
   status.innerHTML = '<span class="spinner"></span>AIが読み取り中... (' + pendingImages.length + '枚)';
   parsedResults = [];
 
+  var imageMap = []; // parsedResults[j]がどのpendingImages[i]に対応するか
   try {
     for (var i = 0; i < pendingImages.length; i++) {
       status.innerHTML = '<span class="spinner"></span>読み取り中... (' + (i + 1) + '/' + pendingImages.length + ')';
-      var result = await readReceipt(pendingImages[i].dataUrl);
-      if (result) parsedResults.push(result);
+      var results = await readReceipt(pendingImages[i].dataUrl);
+      for (var j = 0; j < results.length; j++) {
+        parsedResults.push(results[j]);
+        imageMap.push(i);
+      }
     }
+    // imageMapをグローバルに保持（保存時に使用）
+    window._imageMap = imageMap;
 
     if (parsedResults.length === 0) {
       status.innerHTML = '<span class="error">レシートを読み取れませんでした。画像を確認してください。</span>';
@@ -896,12 +902,15 @@ async function readReceipt(dataUrl) {
   var base64Data = match[2];
 
   var prompt = '以下のレシート画像を分析して、JSON形式で情報を抽出してください。\n\n' +
-    '必ず以下のJSON形式のみを出力してください（説明文不要）:\n' +
-    '{"date":"YYYY-MM-DD","store":"店名","amount":金額(税込総額,数値),"taxAmount":消費税額(数値,不明なら0),"category":"勘定科目","description":"品目の概要","tax":"課税区分","invoiceNo":"T+13桁の適格請求書発行事業者登録番号(なければ空文字)"}\n\n' +
+    '**重要**: 1枚のレシートに異なる税率の品目がある場合（例: 食品8%と日用品10%）、税率ごとに分けてJSON配列で出力してください。\n' +
+    '税率が1つだけの場合も配列で出力してください。\n\n' +
+    '出力形式（説明文不要、JSON配列のみ）:\n' +
+    '[{"date":"YYYY-MM-DD","store":"店名","amount":税率別の税込小計(数値),"taxAmount":税率別の消費税額(数値,不明なら0),"category":"勘定科目","description":"品目の概要","tax":"課税区分","invoiceNo":"T+13桁の登録番号(なければ空文字)"}]\n\n' +
     '勘定科目は以下から選択: 旅費交通費, 通信費, 消耗品費, 会議費, 交際費, 新聞図書費, 地代家賃, 水道光熱費, 広告宣伝費, 外注費, 支払手数料, 福利厚生費, 雑費\n' +
     '税区分は: 課税仕入10%, 課税仕入8%(軽減), 非課税, 不課税 から選択\n' +
-    '日付が読み取れない場合は今日の日付を使用。金額は税込み総額。\n' +
-    'T番号（T+13桁の数字）がレシートに記載されていれば必ず読み取ること。登録番号、適格請求書発行事業者番号などの表記で記載されている。';
+    '日付が読み取れない場合は今日の日付を使用。\n' +
+    'T番号（T+13桁の数字）がレシートに記載されていれば必ず読み取ること。登録番号、適格請求書発行事業者番号などの表記で記載されている。\n' +
+    '税率別の小計がレシートに記載されていればそれを使用。記載がなければ合計金額を1エントリで出力。';
 
   var body = {
     contents: [{
@@ -933,20 +942,26 @@ async function readReceipt(dataUrl) {
 
   var data = await response.json();
   var text = data.candidates[0].content.parts[0].text;
-  var jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
 
-  var parsed = JSON.parse(jsonMatch[0]);
-  // Validate
-  if (!parsed.amount || parsed.amount <= 0) return null;
-  parsed.date = parsed.date || new Date().toISOString().slice(0, 10);
-  parsed.store = parsed.store || '不明';
-  parsed.category = parsed.category || '雑費';
-  parsed.description = parsed.description || '';
-  parsed.tax = parsed.tax || '課税仕入10%';
-  parsed.taxAmount = parsed.taxAmount || 0;
-  parsed.invoiceNo = parsed.invoiceNo || '';
-  return parsed;
+  // 配列またはオブジェクトのJSONをパース
+  var jsonMatch = text.match(/\[[\s\S]*\]/) || text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return [];
+
+  var raw = JSON.parse(jsonMatch[0]);
+  var items = Array.isArray(raw) ? raw : [raw];
+
+  return items.filter(function(p) {
+    return p.amount && p.amount > 0;
+  }).map(function(p) {
+    p.date = p.date || new Date().toISOString().slice(0, 10);
+    p.store = p.store || '不明';
+    p.category = p.category || '雑費';
+    p.description = p.description || '';
+    p.tax = p.tax || '課税仕入10%';
+    p.taxAmount = p.taxAmount || 0;
+    p.invoiceNo = p.invoiceNo || '';
+    return p;
+  });
 }
 
 // ==================== Results display ====================
@@ -1007,12 +1022,22 @@ async function saveToSheets() {
     status.innerHTML = '<span class="spinner"></span>証憑をアップロード中...';
     var driveLinks = [];
     var imageHashes = [];
+    var uploadedForImage = {}; // 同じ画像は1回だけアップロード
+    var imap = window._imageMap || [];
     for (var i = 0; i < parsedResults.length; i++) {
       var link = '';
       var imgHash = '';
-      if (pendingImages[i] && pendingImages[i].dataUrl) {
-        link = await uploadReceiptToDrive(pendingImages[i].dataUrl, parsedResults[i].store, parsedResults[i].date);
-        imgHash = await computeHash(pendingImages[i].dataUrl);
+      var imgIdx = imap[i] !== undefined ? imap[i] : i;
+      var img = pendingImages[imgIdx];
+      if (img && img.dataUrl) {
+        if (uploadedForImage[imgIdx]) {
+          link = uploadedForImage[imgIdx].link;
+          imgHash = uploadedForImage[imgIdx].hash;
+        } else {
+          link = await uploadReceiptToDrive(img.dataUrl, parsedResults[i].store, parsedResults[i].date);
+          imgHash = await computeHash(img.dataUrl);
+          uploadedForImage[imgIdx] = { link: link, hash: imgHash };
+        }
       }
       driveLinks.push(link);
       imageHashes.push(imgHash);
