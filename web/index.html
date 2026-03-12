@@ -553,17 +553,37 @@ function initGIS() {
     scope: SCOPES,
     callback: onTokenResponse,
   });
-  // ページ読み込み時にサイレント再認証を試行
-  tryAutoSignIn();
+  // sessionStorageからトークンを復元
+  var saved = sessionStorage.getItem('choreia_token');
+  if (saved) {
+    accessToken = saved;
+    restoreSession();
+  }
 }
 
-function tryAutoSignIn() {
-  tokenClient.requestAccessToken({ prompt: '' });
+async function restoreSession() {
+  try {
+    var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
+    currentUserName = me.name || me.email;
+    document.getElementById('user-name').textContent = currentUserName;
+    var avatarEl = document.getElementById('user-avatar');
+    if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
+    else { avatarEl.style.display = 'none'; }
+    document.getElementById('auth-out').style.display = 'none';
+    document.getElementById('auth-in').style.display = 'flex';
+    await findOrCreateSpreadsheet();
+    await findOrCreateDriveFolder();
+  } catch(e) {
+    // トークン期限切れ
+    accessToken = null;
+    sessionStorage.removeItem('choreia_token');
+  }
 }
 
 async function onTokenResponse(resp) {
   if (resp.error) return;
   accessToken = resp.access_token;
+  sessionStorage.setItem('choreia_token', accessToken);
   document.getElementById('auth-out').style.display = 'none';
   document.getElementById('auth-in').style.display = 'flex';
   try {
@@ -586,6 +606,7 @@ function handleSignIn() {
 function handleSignOut() {
   if (accessToken) google.accounts.oauth2.revoke(accessToken);
   accessToken = null;
+  sessionStorage.removeItem('choreia_token');
   spreadsheetId = null;
   driveFolderId = null;
   document.getElementById('auth-out').style.display = 'block';
