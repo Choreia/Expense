@@ -633,6 +633,7 @@ async function findOrCreateSpreadsheet() {
           {userEnteredValue:{stringValue:'税区分'}},
           {userEnteredValue:{stringValue:'登録日時'}},
           {userEnteredValue:{stringValue:'証憑URL'}},
+          {userEnteredValue:{stringValue:'証憑ハッシュ'}},
         ]}]
       }]
     },{
@@ -965,25 +966,36 @@ async function saveToSheets() {
   status.innerHTML = '<span class="spinner"></span>保存中...';
 
   try {
-    var now = new Date().toLocaleString('ja-JP');
+    // 電帳法: Googleサーバー時刻を取得（端末時刻の偽装防止）
+    var now;
+    try {
+      var timeRes = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=' + accessToken);
+      now = new Date(timeRes.headers.get('date')).toLocaleString('ja-JP');
+    } catch(e) {
+      now = new Date().toLocaleString('ja-JP');
+    }
 
-    // 電帳法: レシート画像をDriveにアップロード
+    // 電帳法: レシート画像をDriveにアップロード + ハッシュ計算
     status.innerHTML = '<span class="spinner"></span>証憑をアップロード中...';
     var driveLinks = [];
+    var imageHashes = [];
     for (var i = 0; i < parsedResults.length; i++) {
       var link = '';
+      var imgHash = '';
       if (pendingImages[i] && pendingImages[i].dataUrl) {
         link = await uploadReceiptToDrive(pendingImages[i].dataUrl, parsedResults[i].store, parsedResults[i].date);
+        imgHash = await computeHash(pendingImages[i].dataUrl);
       }
       driveLinks.push(link);
+      imageHashes.push(imgHash);
     }
     status.innerHTML = '<span class="spinner"></span>Sheetsに保存中...';
 
     var values = parsedResults.map(function(r, idx) {
-      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, driveLinks[idx] || ''];
+      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, driveLinks[idx] || '', imageHashes[idx] || ''];
     });
 
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:H:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
