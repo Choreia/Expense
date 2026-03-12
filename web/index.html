@@ -653,6 +653,8 @@ async function findOrCreateSpreadsheet() {
           {userEnteredValue:{stringValue:'摘要'}},
           {userEnteredValue:{stringValue:'税区分'}},
           {userEnteredValue:{stringValue:'登録日時'}},
+          {userEnteredValue:{stringValue:'税額'}},
+          {userEnteredValue:{stringValue:'T番号'}},
           {userEnteredValue:{stringValue:'証憑URL'}},
           {userEnteredValue:{stringValue:'証憑ハッシュ'}},
         ]}]
@@ -895,10 +897,11 @@ async function readReceipt(dataUrl) {
 
   var prompt = '以下のレシート画像を分析して、JSON形式で情報を抽出してください。\n\n' +
     '必ず以下のJSON形式のみを出力してください（説明文不要）:\n' +
-    '{"date":"YYYY-MM-DD","store":"店名","amount":金額(数値),"category":"勘定科目","description":"品目の概要","tax":"課税区分"}\n\n' +
+    '{"date":"YYYY-MM-DD","store":"店名","amount":金額(税込総額,数値),"taxAmount":消費税額(数値,不明なら0),"category":"勘定科目","description":"品目の概要","tax":"課税区分","invoiceNo":"T+13桁の適格請求書発行事業者登録番号(なければ空文字)"}\n\n' +
     '勘定科目は以下から選択: 旅費交通費, 通信費, 消耗品費, 会議費, 交際費, 新聞図書費, 地代家賃, 水道光熱費, 広告宣伝費, 外注費, 支払手数料, 福利厚生費, 雑費\n' +
     '税区分は: 課税仕入10%, 課税仕入8%(軽減), 非課税, 不課税 から選択\n' +
-    '日付が読み取れない場合は今日の日付を使用。金額は税込み総額。';
+    '日付が読み取れない場合は今日の日付を使用。金額は税込み総額。\n' +
+    'T番号（T+13桁の数字）がレシートに記載されていれば必ず読み取ること。登録番号、適格請求書発行事業者番号などの表記で記載されている。';
 
   var body = {
     contents: [{
@@ -941,6 +944,8 @@ async function readReceipt(dataUrl) {
   parsed.category = parsed.category || '雑費';
   parsed.description = parsed.description || '';
   parsed.tax = parsed.tax || '課税仕入10%';
+  parsed.taxAmount = parsed.taxAmount || 0;
+  parsed.invoiceNo = parsed.invoiceNo || '';
   return parsed;
 }
 
@@ -960,6 +965,8 @@ function renderResults() {
       '<div class="field"><span class="label">摘要</span><input type="text" value="' + escHtml(r.description) + '" onchange="parsedResults[' + i + '].description=this.value"></div>' +
       '<div class="field"><span class="label">税区分</span><select onchange="parsedResults[' + i + '].tax=this.value">' + taxOptions + '</select></div>' +
       '<div class="field"><span class="label">金額</span><input type="number" value="' + Number(r.amount) + '" min="0" onchange="parsedResults[' + i + '].amount=Number(this.value)"></div>' +
+      '<div class="field"><span class="label">税額</span><input type="number" value="' + Number(r.taxAmount) + '" min="0" onchange="parsedResults[' + i + '].taxAmount=Number(this.value)"></div>' +
+      '<div class="field"><span class="label">T番号</span><input type="text" value="' + escHtml(r.invoiceNo) + '" placeholder="T0000000000000" onchange="parsedResults[' + i + '].invoiceNo=this.value"></div>' +
       '</div>';
   }).join('');
   document.getElementById('resultsCard').style.display = 'block';
@@ -1013,10 +1020,10 @@ async function saveToSheets() {
     status.innerHTML = '<span class="spinner"></span>Sheetsに保存中...';
 
     var values = parsedResults.map(function(r, idx) {
-      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, driveLinks[idx] || '', imageHashes[idx] || ''];
+      return [r.date, r.store, r.amount, r.category, r.description, r.tax, now, r.taxAmount || 0, r.invoiceNo || '', driveLinks[idx] || '', imageHashes[idx] || ''];
     });
 
-    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
+    await apiFetch('https://sheets.googleapis.com/v4/spreadsheets/' + spreadsheetId + '/values/' + encodeURIComponent(SHEET_NAME) + '!A:K:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: values }),
@@ -1025,7 +1032,7 @@ async function saveToSheets() {
     // 電帳法: 変更履歴に新規登録を記録
     for (var j = 0; j < parsedResults.length; j++) {
       var r = parsedResults[j];
-      var detail = r.date + ' / ' + r.store + ' / ¥' + r.amount + ' / ' + r.category;
+      var detail = r.date + ' / ' + r.store + ' / ¥' + r.amount + ' / ' + r.category + (r.invoiceNo ? ' / ' + r.invoiceNo : '');
       appendChangeLog('新規登録', '', '', detail);
     }
 
@@ -1076,7 +1083,7 @@ async function loadDashboard() {
     }
 
     allExpenseRows = rows.slice(1).map(function(r) {
-      return { date: r[0] || '', store: r[1] || '', amount: Number(r[2]) || 0, category: r[3] || '', description: r[4] || '', tax: r[5] || '' };
+      return { date: r[0] || '', store: r[1] || '', amount: Number(r[2]) || 0, category: r[3] || '', description: r[4] || '', tax: r[5] || '', taxAmount: Number(r[7]) || 0, invoiceNo: r[8] || '' };
     });
 
     document.getElementById('dashArea').style.display = 'block';
@@ -1211,9 +1218,9 @@ function renderHistoryView() {
 
   var total = filtered.reduce(function(s, r) { return s + r.amount; }, 0);
   var html = '<div style="text-align:right;font-size:0.9em;margin-bottom:8px;color:#8a7e6e">' + filtered.length + '件 / 合計 <strong style="color:#a0522d">¥' + total.toLocaleString() + '</strong></div>';
-  html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th style="text-align:right">金額</th></tr></thead><tbody>';
+  html += '<table class="history-table"><thead><tr><th>日付</th><th>店名</th><th>科目</th><th style="text-align:right">金額</th><th>T番号</th></tr></thead><tbody>';
   html += filtered.map(function(r) {
-    return '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.store) + '</td><td>' + escHtml(r.category) + '</td><td class="amount-cell">¥' + r.amount.toLocaleString() + '</td></tr>';
+    return '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.store) + '</td><td>' + escHtml(r.category) + '</td><td class="amount-cell">¥' + r.amount.toLocaleString() + '</td><td style="font-size:0.75em">' + escHtml(r.invoiceNo) + '</td></tr>';
   }).join('');
   html += '</tbody></table>';
   document.getElementById('historyTable').innerHTML = html;
