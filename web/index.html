@@ -563,6 +563,10 @@ function initGIS() {
 
 async function restoreSession() {
   try {
+    // トークンの有効性を確認
+    var tokenCheck = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=' + accessToken);
+    if (!tokenCheck.ok) throw new Error('token_expired');
+
     var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
     currentUserName = me.name || me.email;
     document.getElementById('user-name').textContent = currentUserName;
@@ -574,7 +578,7 @@ async function restoreSession() {
     await findOrCreateSpreadsheet();
     await findOrCreateDriveFolder();
   } catch(e) {
-    // トークン期限切れ
+    // トークン期限切れ — クリアしてログイン画面に戻す
     accessToken = null;
     sessionStorage.removeItem('choreia_token');
   }
