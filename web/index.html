@@ -562,26 +562,28 @@ function initGIS() {
 }
 
 async function restoreSession() {
-  try {
-    // トークンの有効性を確認
-    var tokenCheck = await fetch('https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=' + accessToken);
-    if (!tokenCheck.ok) throw new Error('token_expired');
-
-    var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
-    currentUserName = me.name || me.email;
-    document.getElementById('user-name').textContent = currentUserName;
-    var avatarEl = document.getElementById('user-avatar');
-    if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
-    else { avatarEl.style.display = 'none'; }
-    document.getElementById('auth-out').style.display = 'none';
-    document.getElementById('auth-in').style.display = 'flex';
-    await findOrCreateSpreadsheet();
-    await findOrCreateDriveFolder();
-  } catch(e) {
-    // トークン期限切れ — クリアしてログイン画面に戻す
+  // トークンの有効性をuserinfo APIで直接確認
+  var res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { 'Authorization': 'Bearer ' + accessToken }
+  });
+  if (!res.ok) {
+    // トークン期限切れ
     accessToken = null;
     sessionStorage.removeItem('choreia_token');
+    return;
   }
+  var me = await res.json();
+  currentUserName = me.name || me.email;
+  document.getElementById('user-name').textContent = currentUserName;
+  var avatarEl = document.getElementById('user-avatar');
+  if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
+  else { avatarEl.style.display = 'none'; }
+  document.getElementById('auth-out').style.display = 'none';
+  document.getElementById('auth-in').style.display = 'flex';
+  try {
+    await findOrCreateSpreadsheet();
+    await findOrCreateDriveFolder();
+  } catch(e) { /* スプレッドシート/Drive初期化エラーは無視 */ }
 }
 
 async function onTokenResponse(resp) {
