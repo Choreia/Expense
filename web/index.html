@@ -562,8 +562,8 @@ function initGIS() {
 }
 
 async function restoreSession() {
-  // トークンの有効性をuserinfo APIで直接確認
-  var res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+  // Drive APIでトークンの有効性を確認（userinfo はスコープ外のため使用不可）
+  var res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
     headers: { 'Authorization': 'Bearer ' + accessToken }
   });
   if (!res.ok) {
@@ -572,11 +572,11 @@ async function restoreSession() {
     sessionStorage.removeItem('choreia_token');
     return;
   }
-  var me = await res.json();
-  currentUserName = me.name || me.email;
+  var about = await res.json();
+  currentUserName = about.user.displayName || about.user.emailAddress || '';
   document.getElementById('user-name').textContent = currentUserName;
   var avatarEl = document.getElementById('user-avatar');
-  if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
+  if (about.user.photoLink) { avatarEl.src = about.user.photoLink; avatarEl.style.display = ''; }
   else { avatarEl.style.display = 'none'; }
   document.getElementById('auth-out').style.display = 'none';
   document.getElementById('auth-in').style.display = 'flex';
@@ -593,11 +593,11 @@ async function onTokenResponse(resp) {
   document.getElementById('auth-out').style.display = 'none';
   document.getElementById('auth-in').style.display = 'flex';
   try {
-    var me = await apiFetch('https://www.googleapis.com/oauth2/v3/userinfo');
-    currentUserName = me.name || me.email;
+    var about = await apiFetch('https://www.googleapis.com/drive/v3/about?fields=user');
+    currentUserName = about.user.displayName || about.user.emailAddress || '';
     document.getElementById('user-name').textContent = currentUserName;
     var avatarEl = document.getElementById('user-avatar');
-    if (me.picture) { avatarEl.src = me.picture; avatarEl.style.display = ''; }
+    if (about.user.photoLink) { avatarEl.src = about.user.photoLink; avatarEl.style.display = ''; }
     else { avatarEl.style.display = 'none'; }
   } catch(e) {}
   await findOrCreateSpreadsheet();
